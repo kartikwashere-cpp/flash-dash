@@ -4,7 +4,8 @@
   "version": "1.0",
   "description": "Beautiful new tab with a big clock, Google search, goal photos, tasks, and bookmarks. Everything you need, nothing you don't.",
   "chrome_url_overrides": {
-    "newtab": "newtab.html"
+  "newtab": "newtab.html"
+}
   },
   "permissions": [
     "storage",
