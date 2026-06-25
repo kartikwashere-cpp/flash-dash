@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Flash Dash</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       Welcome Overlay — shown only on first install
+       Dismissed via "Get Started" button; state stored in chrome.storage.local
+  ════════════════════════════════════════════════════════════ -->
+  <div id="welcomeOverlay" aria-modal="true" role="dialog" aria-label="Welcome to Flash Dash">
+    <div class="welcome-card">
+
+      <!-- Logo + wordmark -->
+      <div class="welcome-logo">
+        <span class="welcome-logo-icon">⚡</span>
+        <span class="welcome-logo-text">Flash Dash</span>
+      </div>
+
+      <!-- One-liner intro -->
+      <p class="welcome-intro">
+        Your new tab, reimagined. A beautiful, distraction-free dashboard
+        every time you open a new tab — no clutter, just what you need.
+      </p>
+
+      <!-- Feature grid (3 cols × 2 rows) -->
+      <div class="feature-grid">
+
+        <div class="feature-card">
+          <span class="feature-icon">🕐</span>
+          <span class="feature-title">Clock</span>
+          <span class="feature-desc">Big, beautiful time display always at a glance</span>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">🔍</span>
+          <span class="feature-title">Search</span>
+          <span class="feature-desc">Google search right from your tab — press <kbd>Ctrl+G</kbd></span>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">🖼️</span>
+          <span class="feature-title">Photo Board</span>
+          <span class="feature-desc">Drag, resize &amp; pin your goal images freely</span>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">✅</span>
+          <span class="feature-title">Tasks</span>
+          <span class="feature-desc">Jot down quick to-dos on the right panel</span>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">🔖</span>
+          <span class="feature-title">Bookmarks</span>
+          <span class="feature-desc">Access &amp; pin your bookmarks from the left bar</span>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-icon">🌙</span>
+          <span class="feature-title">Theme</span>
+          <span class="feature-desc">Toggle dark / light mode with a single click</span>
+        </div>
+
+      </div><!-- /feature-grid -->
+
+      <!-- Dismiss CTA -->
+      <button class="welcome-btn" id="welcomeDismiss">
+        Get Started
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 12h14M12 5l7 7-7 7"/>
+        </svg>
+      </button>
+
+      <!-- Privacy note -->
+      <p class="welcome-privacy">
+        🔒 100% private — all your data stays on your device. Nothing is collected or sent to any server.
+      </p>
+
+    </div><!-- /welcome-card -->
+  </div><!-- /welcomeOverlay -->
+
+  <div class="bg-glow"></div>
+
+  <!-- freeform photo whiteboard layer -->
+  <div class="board" id="board"></div>
+
+  <!-- Left Side Vertical Toolbar -->
+  <nav class="vertical-toolbar" id="verticalToolbar">
+    <div class="toolbar-group">
+      <button class="task-btn" id="addPhotoBtn" title="Add Photo">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-4 4-3-3-6 6"/></svg>
+      </button>
+
+      <button class="task-btn" id="bookmarksToggle" title="Bookmarks">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+      </button>
+    </div>
+
+    <!-- Pinned App Shortcuts -->
+    <div class="toolbar-divider"></div>
+    <div class="toolbar-group" id="pinnedShortcutsGroup">
+      <!-- 4 slots filled dynamically -->
+    </div>
+
+    <!-- Pin / manage shortcuts button -->
+    <button class="task-btn toolbar-pin-btn" id="pinShortcutsBtn" title="Pin App Shortcuts">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+    <div class="toolbar-bottom">
+      <button class="task-btn" id="themeToggle" title="Toggle Theme">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" id="themeIcon"><circle cx="12" cy="12" r="4.5"/></svg>
+      </button>
+      <button class="task-btn task-btn-danger" id="clearPhotosBtn" title="Clear All Photos">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+      </button>
+    </div>
+  </nav>
+
+  <input type="file" id="photoInput" accept="image/*" multiple hidden />
+
+  <!-- slide-out bookmarks drawer (slides from left next to toolbar) -->
+  <div class="bookmarks-drawer" id="bookmarksDrawer">
+    <div class="drawer-header">
+      <span class="drawer-title">Bookmarks</span>
+      <button id="closeBookmarks" class="drawer-close">&times;</button>
+    </div>
+    <ul class="bookmarks-list" id="bookmarksList">
+      <!-- Dynamically populated bookmarks -->
+    </ul>
+  </div>
+
+  <!-- Pin Picker Panel (choose shortcuts to pin) -->
+  <div class="bookmarks-drawer pin-picker" id="pinPickerPanel">
+    <div class="drawer-header">
+      <span class="drawer-title">Pin Shortcuts</span>
+      <button id="closePinPicker" class="drawer-close">&times;</button>
+    </div>
+    <p class="pin-picker-hint" id="pinPickerHint">Choose up to 6 bookmarks to pin as quick-access icons.</p>
+    <ul class="bookmarks-list" id="pinPickerList">
+      <!-- Dynamically populated -->
+    </ul>
+  </div>
+
+  <!-- center clock -->
+  <main class="stage">
+    <div class="clock">
+      <span id="time">00:00</span><span class="ampm" id="ampm">AM</span>
+    </div>
+    <div class="date" id="date">Loading…</div>
+
+    <!-- Google Search Bar (below clock) -->
+    <div class="search-bar-wrapper" id="searchBarWrapper">
+      <div class="search-bar-container" id="searchBarContainer">
+        <div class="search-bar-icon">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M12.24 10.285V13.4h6.887c-.275 1.565-1.88 4.604-6.887 4.604-4.33 0-7.859-3.579-7.859-8s3.53-8 7.859-8c2.46 0 4.105 1.025 5.047 1.926l2.427-2.334C17.955 2.192 15.34 1 12.24 1 5.92 1 12 5.92 1 12s4.92 11 11.24 11c6.596 0 10.985-4.637 10.985-11.173 0-.753-.08-1.332-.178-1.542H12.24z"/>
+          </svg>
+        </div>
+        <input type="text" id="searchBarInput" placeholder="Search or type a URL..." autocomplete="off" />
+        <kbd class="search-shortcut-hint">Ctrl+G</kbd>
+      </div>
+      <!-- Suggestions dropdown -->
+      <div class="search-suggestions" id="searchSuggestions"></div>
+    </div>
+  </main>
+
+  <!-- right control panel -->
+  <aside class="right-panel">
+    <section class="card tasks-card">
+      <header class="card-head">
+        <span class="card-title">Tasks</span>
+        <span class="card-sub" id="taskCount">0 left</span>
+      </header>
+
+      <div class="task-input-row">
+        <input id="taskInput" type="text" placeholder="Add a task..." maxlength="80" />
+      </div>
+
+      <ul class="task-list" id="taskList"></ul>
+    </section>
+  </aside>
+
+
+
+  <!-- Pinned shortcut right-click context menu -->
+  <div class="shortcut-context-menu" id="shortcutContextMenu" style="display:none;">
+    <button class="ctx-danger" id="ctxUnpin">
+      <svg class="ctx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+      Unpin shortcut
+    </button>
+    <button id="ctxOpenLink">
+      <svg class="ctx-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+        <polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+      </svg>
+      Open site
+    </button>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+
+</html>
