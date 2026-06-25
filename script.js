@@ -250,30 +250,32 @@ themeToggle.addEventListener('click', async () => {
   await store.set('theme', next);
 });
 
-// ---------- Gallery of Goals (Glassmorphic Polaroid) ----------
+// ---------- Gallery of Goals (Glassmorphic Polaroid) + Sticky Notes ----------
 const board = document.getElementById('board');
 const photoInput = document.getElementById('photoInput');
 const addPhotoBtn = document.getElementById('addPhotoBtn');
+const addNoteBtn = document.getElementById('addNoteBtn');
 const clearPhotosBtn = document.getElementById('clearPhotosBtn');
 
-// Tracks the highest z-index used so far so we can always bring one more to front
-let _photoZCounter = 10;
+// Shared z-index counter across photos AND notes so "bring to front" works
+// consistently no matter what kind of item the user last touched.
+let _boardZCounter = 10;
 
-function makeDraggable(el, photo, onChange) {
+function makeDraggable(el, item, onChange) {
   el.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.del') || e.target.closest('.resize')) return;
+    if (e.target.closest('.del') || e.target.closest('.resize') || e.target.closest('.note-text') || e.target.closest('.note-dot') || e.target.closest('.note-close') || e.target.closest('.note-resize')) return;
     e.preventDefault();
     const startX = e.clientX, startY = e.clientY;
-    const origX = photo.x, origY = photo.y;
+    const origX = item.x, origY = item.y;
     el.setPointerCapture(e.pointerId);
     el.style.cursor = 'grabbing';
 
     function move(ev) {
       const dx = ev.clientX - startX, dy = ev.clientY - startY;
-      photo.x = origX + dx;
-      photo.y = origY + dy;
-      el.style.left = photo.x + 'px';
-      el.style.top = photo.y + 'px';
+      item.x = origX + dx;
+      item.y = origY + dy;
+      el.style.left = item.x + 'px';
+      el.style.top = item.y + 'px';
     }
     function up() {
       el.removeEventListener('pointermove', move);
@@ -286,20 +288,20 @@ function makeDraggable(el, photo, onChange) {
   });
 }
 
-function makeResizable(el, handle, photo, onChange) {
+function makeResizable(el, handle, item, onChange, minW = 120, minH = 150) {
   handle.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX, startY = e.clientY;
-    const origW = photo.w, origH = photo.h;
+    const origW = item.w, origH = item.h;
     handle.setPointerCapture(e.pointerId);
 
     function move(ev) {
       const dx = ev.clientX - startX, dy = ev.clientY - startY;
-      photo.w = Math.max(120, origW + dx);
-      photo.h = Math.max(150, origH + dy);
-      el.style.width = photo.w + 'px';
-      el.style.height = photo.h + 'px';
+      item.w = Math.max(minW, origW + dx);
+      item.h = Math.max(minH, origH + dy);
+      el.style.width = item.w + 'px';
+      el.style.height = item.h + 'px';
     }
     function up() {
       handle.removeEventListener('pointermove', move);
@@ -309,6 +311,38 @@ function makeResizable(el, handle, photo, onChange) {
     handle.addEventListener('pointermove', move);
     handle.addEventListener('pointerup', up);
   });
+}
+
+// Bring any board item (photo or note) to the front, flash a confirmation
+// ring, and persist via the supplied callback.
+function bringToFront(wrap, item, persist) {
+  _boardZCounter += 1;
+  item.z = _boardZCounter;
+  wrap.style.zIndex = _boardZCounter;
+  wrap.classList.add('photo-lifted');
+  setTimeout(() => wrap.classList.remove('photo-lifted'), 350);
+  persist();
+}
+
+// ── placement helper shared by photo upload & note creation ──────────────
+// Scatters new items near a random existing anchor (of either kind) so
+// photos and notes interleave naturally instead of stacking in one corner.
+function pickPlacement(anchors, w, h) {
+  let x, y;
+  if (anchors.length > 0) {
+    const anchor = anchors[Math.floor(Math.random() * anchors.length)];
+    const minOff = 100, maxOff = 200;
+    const randOff = () => (minOff + Math.random() * (maxOff - minOff)) * (Math.random() < 0.5 ? 1 : -1);
+    x = anchor.x + randOff();
+    y = anchor.y + randOff();
+  } else {
+    x = window.innerWidth / 2 - w / 2;
+    y = window.innerHeight / 2 - h / 2;
+  }
+  const margin = 20;
+  x = Math.max(margin, Math.min(window.innerWidth - w - margin, x));
+  y = Math.max(margin, Math.min(window.innerHeight - h - margin, y));
+  return { x, y };
 }
 
 function renderPhotoEl(photo) {
@@ -322,7 +356,7 @@ function renderPhotoEl(photo) {
   // Apply persisted z-index (default to 2 if none saved yet)
   const savedZ = photo.z || 2;
   wrap.style.zIndex = savedZ;
-  if (savedZ > _photoZCounter) _photoZCounter = savedZ;
+  if (savedZ > _boardZCounter) _boardZCounter = savedZ;
 
   const img = document.createElement('img');
   img.src = photo.src;
@@ -352,26 +386,59 @@ function renderPhotoEl(photo) {
   }
 
   // Click (not drag) → bring this photo to the front
-  wrap.addEventListener('pointerdown', () => {
-    _photoZCounter += 1;
-    photo.z = _photoZCounter;
-    wrap.style.zIndex = _photoZCounter;
-    // Flash a subtle ring to confirm the action
-    wrap.classList.add('photo-lifted');
-    setTimeout(() => wrap.classList.remove('photo-lifted'), 350);
-    persist();
-  });
+  wrap.addEventListener('pointerdown', () => bringToFront(wrap, photo, persist));
 
   makeDraggable(wrap, photo, persist);
   makeResizable(wrap, resize, photo, persist);
 }
 
 async function renderBoard() {
-  const photos = await store.get('photos', []);
+  const [photos, notes] = await Promise.all([
+    store.get('photos', []),
+    store.get('notes', [])
+  ]);
   board.innerHTML = '';
   photos.forEach(renderPhotoEl);
+  notes.forEach(renderNoteEl);
 }
 renderBoard();
+
+// ── shared "add photos" pipeline used by both the file picker and drag-drop ──
+async function addPhotoFiles(files) {
+  const imageFiles = [...files].filter(f => f.type.startsWith('image/'));
+  if (imageFiles.length === 0) return;
+
+  const [photos, notes] = await Promise.all([
+    store.get('photos', []),
+    store.get('notes', [])
+  ]);
+  // Anchor pool includes existing notes too, so photos can land near them
+  const existingSnapshot = [...photos, ...notes];
+  const w = 220, h = 220;
+
+  for (const file of imageFiles) {
+    const dataUrl = await new Promise((res) => {
+      const reader = new FileReader();
+      reader.onload = () => res(reader.result);
+      reader.readAsDataURL(file);
+    });
+
+    const { x, y } = pickPlacement(existingSnapshot, w, h);
+
+    _boardZCounter += 1;
+    const photo = {
+      id: Date.now() + Math.random().toString(36).slice(2),
+      src: dataUrl,
+      x, y, w, h,
+      z: _boardZCounter
+    };
+    photos.push(photo);
+    existingSnapshot.push(photo);
+  }
+
+  await store.set('photos', photos);
+  renderBoard();
+}
 
 addPhotoBtn.addEventListener('click', () => {
   // Close any open panels before opening the file picker
@@ -381,76 +448,179 @@ addPhotoBtn.addEventListener('click', () => {
 });
 
 clearPhotosBtn.addEventListener('click', async () => {
-  const photos = await store.get('photos', []);
-  if (photos.length === 0) return;
+  const [photos, notes] = await Promise.all([
+    store.get('photos', []),
+    store.get('notes', [])
+  ]);
+  const total = photos.length + notes.length;
+  if (total === 0) return;
 
-  const confirmed = confirm(`Remove all ${photos.length} photo${photos.length === 1 ? '' : 's'} from the board?`);
+  const confirmed = confirm(`Remove all ${total} item${total === 1 ? '' : 's'} (photos & notes) from the board?`);
   if (!confirmed) return;
 
-  await store.set('photos', []);
+  await Promise.all([store.set('photos', []), store.set('notes', [])]);
   renderBoard();
 });
 
 photoInput.addEventListener('change', async (e) => {
-  const files = [...e.target.files];
-  const photos = await store.get('photos', []);
+  await addPhotoFiles(e.target.files);
+  photoInput.value = '';
+});
 
-  // Build a pool of existing photos to use as anchors.
-  // We'll shuffle it so each new file gets a different anchor when possible.
-  const existingSnapshot = [...photos];
+// ---------- Drag & drop image upload directly onto the board ----------
+let _dragDepth = 0; // tracks nested dragenter/dragleave so the overlay doesn't flicker
 
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    const dataUrl = await new Promise((res) => {
-      const reader = new FileReader();
-      reader.onload = () => res(reader.result);
-      reader.readAsDataURL(file);
-    });
+function hasFiles(e) {
+  return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files');
+}
 
-    // ── pick a placement position ──────────────────────────────
-    let x, y;
-    const w = 220, h = 220;
+window.addEventListener('dragenter', (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  _dragDepth++;
+  board.classList.add('drag-active');
+});
 
-    if (existingSnapshot.length > 0) {
-      // Pick a different random anchor for each new image
-      const anchor = existingSnapshot[Math.floor(Math.random() * existingSnapshot.length)];
+window.addEventListener('dragover', (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+});
 
-      // Random offset: ±100–200px in each axis, with randomised sign
-      const minOff = 100, maxOff = 200;
-      const randOff = () => (minOff + Math.random() * (maxOff - minOff)) * (Math.random() < 0.5 ? 1 : -1);
+window.addEventListener('dragleave', (e) => {
+  if (!hasFiles(e)) return;
+  _dragDepth = Math.max(0, _dragDepth - 1);
+  if (_dragDepth === 0) board.classList.remove('drag-active');
+});
 
-      x = anchor.x + randOff();
-      y = anchor.y + randOff();
-    } else {
-      // No existing photos — land at centre of the viewport
-      x = window.innerWidth  / 2 - w / 2;
-      y = window.innerHeight / 2 - h / 2;
-    }
+window.addEventListener('drop', async (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  _dragDepth = 0;
+  board.classList.remove('drag-active');
+  await addPhotoFiles(e.dataTransfer.files);
+});
 
-    // ── clamp so the image stays inside the visible board area ──
-    const margin = 20;
-    x = Math.max(margin, Math.min(window.innerWidth  - w - margin, x));
-    y = Math.max(margin, Math.min(window.innerHeight - h - margin, y));
+// ---------- Sticky Notes ----------
+const NOTE_COLORS = ['yellow', 'pink', 'mint', 'sky', 'lilac'];
 
-    _photoZCounter += 1;
-    const photo = {
-      id: Date.now() + Math.random().toString(36).slice(2),
-      src: dataUrl,
-      x,
-      y,
-      w,
-      h,
-      z: _photoZCounter
-    };
-    photos.push(photo);
-    // Also add to the snapshot so subsequent files in the same batch
-    // can anchor to photos added in this very upload
-    existingSnapshot.push(photo);
+function renderNoteEl(note) {
+  const wrap = document.createElement('div');
+  wrap.className = `note note-${note.color || 'yellow'}`;
+  wrap.style.left = note.x + 'px';
+  wrap.style.top = note.y + 'px';
+  wrap.style.width = note.w + 'px';
+  wrap.style.height = note.h + 'px';
+
+  const savedZ = note.z || 2;
+  wrap.style.zIndex = savedZ;
+  if (savedZ > _boardZCounter) _boardZCounter = savedZ;
+
+  async function persist() {
+    const notes = await store.get('notes', []);
+    const idx = notes.findIndex(n => n.id === note.id);
+    if (idx > -1) { notes[idx] = note; await store.set('notes', notes); }
   }
 
-  await store.set('photos', photos);
-  photoInput.value = '';
-  renderBoard();
+  // Header row: accent dot (click to cycle color) + close button
+  const header = document.createElement('div');
+  header.className = 'note-header';
+
+  const dot = document.createElement('button');
+  dot.className = 'note-dot';
+  dot.setAttribute('aria-label', 'Change note color');
+  dot.title = 'Change color';
+  dot.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const curIdx = NOTE_COLORS.indexOf(note.color);
+    note.color = NOTE_COLORS[(curIdx + 1) % NOTE_COLORS.length];
+    wrap.className = `note note-${note.color}`;
+    wrap.style.left = note.x + 'px';
+    wrap.style.top = note.y + 'px';
+    wrap.style.width = note.w + 'px';
+    wrap.style.height = note.h + 'px';
+    wrap.style.zIndex = note.z || savedZ;
+    persist();
+  });
+  header.appendChild(dot);
+
+  const del = document.createElement('div');
+  del.className = 'note-close';
+  del.textContent = '×';
+  del.addEventListener('click', async () => {
+    const notes = await store.get('notes', []);
+    const filtered = notes.filter(n => n.id !== note.id);
+    await store.set('notes', filtered);
+    wrap.remove();
+  });
+  header.appendChild(del);
+
+  wrap.appendChild(header);
+
+  // Editable text area
+  const text = document.createElement('div');
+  text.className = 'note-text';
+  text.contentEditable = 'true';
+  text.setAttribute('data-placeholder', 'Type a note…');
+  text.textContent = note.text || '';
+  text.spellcheck = false;
+
+  let saveTimer = null;
+  text.addEventListener('input', () => {
+    note.text = text.textContent;
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(persist, 400); // debounce so typing doesn't hammer storage
+  });
+  // Don't let the drag handler engage while editing, but still bring the
+  // note to front so it's not buried under another item while typing.
+  text.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+    bringToFront(wrap, note, persist);
+  });
+  wrap.appendChild(text);
+
+  const resize = document.createElement('div');
+  resize.className = 'note-resize';
+  wrap.appendChild(resize);
+
+  board.appendChild(wrap);
+
+  wrap.addEventListener('pointerdown', () => bringToFront(wrap, note, persist));
+
+  makeDraggable(wrap, note, persist);
+  makeResizable(wrap, resize, note, persist, 160, 130);
+
+  return wrap;
+}
+
+addNoteBtn.addEventListener('click', async () => {
+  bookmarksDrawer.classList.remove('open');
+  pinPickerPanel.classList.remove('open');
+
+  const [photos, notes] = await Promise.all([
+    store.get('photos', []),
+    store.get('notes', [])
+  ]);
+  const existingSnapshot = [...photos, ...notes];
+  const w = 220, h = 200;
+  const { x, y } = pickPlacement(existingSnapshot, w, h);
+
+  _boardZCounter += 1;
+  const note = {
+    id: Date.now() + Math.random().toString(36).slice(2),
+    text: '',
+    color: NOTE_COLORS[Math.floor(Math.random() * NOTE_COLORS.length)],
+    x, y, w, h,
+    z: _boardZCounter
+  };
+  notes.push(note);
+  await store.set('notes', notes);
+
+  const wrap = renderNoteEl(note);
+  // Focus the new note's text area immediately so the user can start typing
+  requestAnimationFrame(() => {
+    const t = wrap.querySelector('.note-text');
+    t.focus();
+  });
 });
 
 // ---------- Pinned App Shortcuts ----------
